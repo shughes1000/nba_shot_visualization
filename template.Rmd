@@ -1,0 +1,21 @@
+---
+title: "Template"
+author: "Sam Hughes"
+date: "2023-03-24"
+output: pdf_document
+---
+
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+l = list()
+for (season in c(2007:2022)) {
+  l = l %>% append(list(readRDS(paste0('./data/shot_data_', season, '.rds'))))
+}
+
+df = bind_rows(l)
+```
+
