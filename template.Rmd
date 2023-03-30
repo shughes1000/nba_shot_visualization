@@ -24,86 +24,18 @@ rm(l)
 ```
 
 
-## Draw Court Function
-Citation for court dimensions: https://towardsdatascience.com/make-a-simple-nba-shot-chart-with-python-e5d70db45d0d
+Data cleaning
 ```{r}
-draw_court = function(color='black', hoop_color='orange', background=NULL) {
-  return(list(geom_segment(mapping=aes(x=-250, xend=250, y=-40, yend=-40), size=1, color=color), 
-  geom_segment(mapping=aes(x=-250, xend=250, y=430, yend=430), size=1, color=color),
-  geom_segment(mapping=aes(x=-250, xend=-250, y=-40, yend=430), size=1, color=color),
-  geom_segment(mapping=aes(x=250, xend=250, y=-40, yend=430), size=1, color=color),
-  # three point line
-  geom_segment(mapping=aes(x=-220, xend=-220, y=-40, yend=90), size=1, color=color),
-  geom_segment(mapping=aes(x=220, xend=220, y=-40, yend=90), size=1, color=color),
-  geom_curve(mapping=aes(x=-220, xend=220, y=90, yend=90), size=1, 
-             curvature=-0.79, lineend='round', color=color),
-  # key
-  geom_segment(mapping=aes(x=-80, xend=-80, y=-40, yend=150), size=1, color=color),
-  geom_segment(mapping=aes(x=80, xend=80, y=-40, yend=150), size=1, color=color),
-  geom_segment(mapping=aes(x=-60, xend=-60, y=-40, yend=150), size=1, color=color),
-  geom_segment(mapping=aes(x=60, xend=60, y=-40, yend=150), size=1, color=color),
-  geom_segment(mapping=aes(x=-80, xend=80, y=150, yend=150), size=1, color=color),
-  geom_curve(mapping=aes(x=-60, xend=60, y=150, yend=150), size=1, 
-             curvature=-1, lineend='round', color=color),
-  # hoop
-  geom_segment(mapping=aes(x=-30, xend=30, y=0, yend=0), size=1, color=color),
-  geom_curve(mapping=aes(x=-10, xend=10, y=13, yend=13), size=1, 
-             curvature=-1, color=hoop_color, lineend='round', color=color),
-  geom_curve(mapping=aes(x=-10, xend=10, y=13, yend=13), size=1, 
-             curvature=1, color=hoop_color, lineend='round', color=color),
-  lims(x=c(-250, 250), y=c(-40, 430)),
-  theme_minimal(), 
-  theme(panel.grid=element_blank(), 
-        panel.background=element_rect(fill=background, linetype='blank'), 
-        plot.background=element_rect(fill=background, linetype='blank'), 
-        axis.text=element_blank(), axis.title=element_blank(), 
-        aspect.ratio=4/3.76)))
-}
+# Make sure 0 distance shots are from restricted area
+df = df[df$SHOT_ZONE_BASIC == 'Restricted Area' | df$SHOT_DISTANCE > 0, ]
+
+# Make sure 3 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '3PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('In The Paint (Non-RA)', 'Mid-Range', 
+                                      'Restricted Area')), ]
+
+# Make sure 2 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '2PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('Left Corner 3', 'Right Corner 3', 
+                                     'Above the Break 3', 'Backcourt')), ]
 ```
-
-
-## Example Shot Charts
-Note: I filter out shots in the restricted area because they tend to skew the shot proportions (because many shots are taken within a very small area)
-
-Frequency with heat map
-```{r}
-ggplot(data=df %>% filter(PLAYER_NAME == 'Marcus Smart' & 
-                            SHOT_ZONE_BASIC != 'Restricted Area'), 
-       mapping=aes(x=LOC_X, y=LOC_Y)) +
-  geom_density2d_filled(show.legend=FALSE) +
-  draw_court(color='grey')
-```
-
-
-Frequency with hex bins
-```{r}
-ggplot(data=df %>% filter(TEAM_NAME == 'Cleveland Cavaliers' & 
-                            season == 2018 & 
-                            SHOT_ZONE_BASIC != 'Restricted Area'), 
-       mapping=aes(x=LOC_X, y=LOC_Y)) +
-  geom_hex() + 
-  scale_fill_gradient(low='white', 
-                      high='orange') +
-  draw_court()
-```
-
-Make percentage with hex bins
-(This one would probably be better with a model so it could display make percentage above expected)
-```{r}
-ggplot(data=df %>% filter(TEAM_NAME == 'Golden State Warriors' & 
-                            season == 2022 & 
-                            SHOT_ZONE_BASIC != 'Restricted Area'), 
-       mapping=aes(x=LOC_X, y=LOC_Y, z=SHOT_MADE_FLAG)) +
-  stat_summary_hex() +
-  scale_fill_gradient(low='light blue', 
-                      high='orange') +
-  draw_court()
-```
-
-
-
-
-
-
-
-
