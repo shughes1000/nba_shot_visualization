@@ -1,0 +1,146 @@
+---
+title: "Example Bar Graphs"
+author: "Sam Hughes"
+date: "2023-03-30"
+output: pdf_document
+---
+
+
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+l = list()
+for (season in c(2007:2022)) {
+  l = l %>% append(list(readRDS(paste0('./data/shot_data_', season, '.rds'))))
+}
+
+df = bind_rows(l)
+
+rm(l)
+```
+
+
+```{r}
+# Make sure 0 distance shots are from restricted area
+df = df[df$SHOT_ZONE_BASIC == 'Restricted Area' | df$SHOT_DISTANCE > 0, ]
+
+# Make sure 3 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '3PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('In The Paint (Non-RA)', 'Mid-Range', 
+                                      'Restricted Area')), ]
+
+# Make sure 2 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '2PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('Left Corner 3', 'Right Corner 3', 
+                                     'Above the Break 3', 'Backcourt')), ]
+```
+
+
+## Bar Graphs
+
+```{r}
+df_shot_zone_totals = df %>% group_by(season, SHOT_ZONE_BASIC) %>%
+  summarise(shot_count=length(SHOT_ZONE_BASIC), shots_made=sum(SHOT_MADE_FLAG))
+df_shot_totals = df %>% group_by(season) %>% 
+  summarise(total_shots=length(SHOT_ZONE_BASIC))
+
+df_shot_zone_totals$field_goal_pct = df_shot_zone_totals$shots_made/df_shot_zone_totals$shot_count
+
+df_shot_zone_totals = left_join(df_shot_zone_totals, df_shot_totals)
+
+df_shot_zone_totals$Proportion = df_shot_zone_totals$shot_count/df_shot_zone_totals$total_shots
+
+df_shot_zone_totals = left_join(df_shot_zone_totals, 
+                               df %>% select(c(SHOT_ZONE_BASIC, SHOT_TYPE)) %>% unique())
+
+head(df_shot_zone_totals)
+```
+
+
+citation for multiple graphs in a single plot: https://stackoverflow.com/questions/13649473/add-a-common-legend-for-combined-ggplots
+```{r}
+library(ggpubr)
+```
+
+
+```{r, fig.height=5, fig.width=5}
+shot_selection_graph = ggplot(data=df_shot_zone_totals %>% 
+                                filter(SHOT_ZONE_BASIC != 'Backcourt'), 
+       mapping=aes(x=season, y=Proportion, fill=SHOT_TYPE)) +
+  geom_bar(stat='identity', show.legend=FALSE) +
+  facet_wrap(~factor(SHOT_ZONE_BASIC, 
+                     levels=c('Mid-Range', 'Restricted Area', 'In The Paint (Non-RA)', 
+                              'Above the Break 3', 'Left Corner 3', 'Right Corner 3'))) +
+  labs(title='How Has Shot Selection Changed Over Time?', 
+       x='Season\n', y='Frequency') +
+  scale_x_continuous(breaks=seq(2007, 2022, 3)) +
+  theme_bw()
+
+field_goal_percentage_graph = ggplot(data=df_shot_zone_totals %>% 
+                                       filter(SHOT_ZONE_BASIC != 'Backcourt'), 
+       mapping=aes(x=season, y=field_goal_pct, fill=SHOT_TYPE)) +
+  geom_bar(stat='identity', show.legend=FALSE) +
+  facet_wrap(~factor(SHOT_ZONE_BASIC, 
+                     levels=c('Mid-Range', 'Restricted Area', 'In The Paint (Non-RA)', 
+                              'Above the Break 3', 'Left Corner 3', 'Right Corner 3'))) +
+  labs(title='Have Shooters Become More Accurate?', 
+       x='Season', y='Field Goal Percentage') +
+  scale_x_continuous(breaks=seq(2007, 2022, 3)) +
+  theme_bw()
+
+ggarrange(shot_selection_graph, field_goal_percentage_graph, nrow=2)
+```
+The two above graphs show that shot selection has vastly changed (less mid range shots, more above the break three point shots) despite the percentage of made shots from each zone staying relatively stagnant. This can be explained by the breakthrough in strategy, where the expected points scored from two point field goals versus three point field goals is considered. 
+
+
+```{r}
+df_grouped = df %>% group_by(SHOT_DISTANCE, SHOT_TYPE) %>% 
+  summarise(pct = mean(SHOT_MADE_FLAG), count=length(SHOT_DISTANCE)) 
+df_grouped = df_grouped %>% mutate(ep = if_else(SHOT_TYPE == '2PT Field Goal', 2*pct, 3*pct))
+
+head(df_grouped)
+```
+
+
+Expected Points of Shot: $ExpectedPoints = MakePercentage * ShotType$ where $ShotType = 2$ for a two point shot and $ShotType = 3$ for a three point shot
+```{r, fig.height=5, fig.width=5}
+pct_by_distance_graph = ggplot(data=df_grouped %>% 
+                                 filter(SHOT_DISTANCE <= 30), 
+         mapping=aes(x=SHOT_DISTANCE, y=pct, fill=SHOT_TYPE)) +
+  geom_bar(stat='identity', position='dodge') +
+  theme_minimal() +
+  scale_x_continuous(breaks=seq(0, 30, 2)) +
+  labs(title='Field Goal Percentage by Distance', 
+       x='Shot Distance (Feet)\n', 
+       y='Make Percentage', 
+       fill='Shot Type')
+
+ep_by_distance_graph = ggplot(data=df_grouped %>% 
+         filter(SHOT_DISTANCE <= 30), 
+         mapping=aes(x=SHOT_DISTANCE, y=ep, fill=SHOT_TYPE)) +
+  geom_bar(stat='identity', position='dodge') +
+  theme_minimal() +
+  scale_x_continuous(breaks=seq(0, 30, 2)) +
+  labs(title='Expected Points by Distance', 
+       x='Shot Distance (Feet)', 
+       y='Expected Value of Shot', 
+       fill='Shot Type')
+
+# grid.arrange(pct_by_distance_graph, ep_by_distance_graph, nrow=2)
+
+ggarrange(pct_by_distance_graph, ep_by_distance_graph, nrow=2, 
+          common.legend=TRUE, legend='bottom')
+```
+
+
+
+
+
+
+
+
+
+
