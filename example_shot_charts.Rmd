@@ -1,0 +1,215 @@
+---
+title: "Example Shot Charts"
+author: "Sam Hughes"
+date: "2023-03-30"
+output: pdf_document
+---
+
+
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+l = list()
+for (season in c(2007:2022)) {
+  l = l %>% append(list(readRDS(paste0('./data/shot_data_', season, '.rds'))))
+}
+
+df = bind_rows(l)
+
+rm(l)
+```
+
+
+```{r}
+# Make sure 0 distance shots are from restricted area
+df = df[df$SHOT_ZONE_BASIC == 'Restricted Area' | df$SHOT_DISTANCE > 0, ]
+
+# Make sure 3 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '3PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('In The Paint (Non-RA)', 'Mid-Range', 
+                                      'Restricted Area')), ]
+
+# Make sure 2 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '2PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('Left Corner 3', 'Right Corner 3', 
+                                     'Above the Break 3', 'Backcourt')), ]
+```
+
+
+
+## Example Shot Charts
+
+### Draw Court Function
+Citation for court dimensions: https://towardsdatascience.com/make-a-simple-nba-shot-chart-with-python-e5d70db45d0d
+```{r}
+draw_court = function(color='black', hoop_color='orange', background=NULL) {
+  return(list(geom_segment(mapping=aes(x=-250, xend=250, y=-40, yend=-40), size=1, color=color), 
+  geom_segment(mapping=aes(x=-250, xend=250, y=430, yend=430), size=1, color=color),
+  geom_segment(mapping=aes(x=-250, xend=-250, y=-40, yend=430), size=1, color=color),
+  geom_segment(mapping=aes(x=250, xend=250, y=-40, yend=430), size=1, color=color),
+  # three point line
+  geom_segment(mapping=aes(x=-220, xend=-220, y=-40, yend=90), size=1, color=color),
+  geom_segment(mapping=aes(x=220, xend=220, y=-40, yend=90), size=1, color=color),
+  geom_curve(mapping=aes(x=-220, xend=220, y=90, yend=90), size=1, 
+             curvature=-0.78, lineend='round', color=color),
+  # key
+  geom_segment(mapping=aes(x=-80, xend=-80, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=80, xend=80, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=-60, xend=-60, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=60, xend=60, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=-80, xend=80, y=150, yend=150), size=1, color=color),
+  geom_curve(mapping=aes(x=-60, xend=60, y=150, yend=150), size=1, 
+             curvature=-1, lineend='round', color=color),
+  # hoop
+  geom_segment(mapping=aes(x=-30, xend=30, y=0, yend=0), size=1, color=color),
+  geom_curve(mapping=aes(x=-10, xend=10, y=13, yend=13), size=1, 
+             curvature=-1, color=hoop_color, lineend='round', color=color),
+  geom_curve(mapping=aes(x=-10, xend=10, y=13, yend=13), size=1, 
+             curvature=1, color=hoop_color, lineend='round', color=color),
+  lims(x=c(-250, 250), y=c(-40, 430)),
+  theme_minimal(), 
+  theme(panel.grid=element_blank(), 
+        panel.background=element_rect(fill=background, linetype='blank'), 
+        plot.background=element_rect(fill=background, linetype='blank'), 
+        axis.text=element_blank(), axis.title=element_blank(), 
+        aspect.ratio=4/3.76)))
+}
+```
+
+
+
+Note: to help with the fact that so many shots are taken within a very close region to the hoop, I am manually adjusting the scale of the frequency plots. In the hexbins, I adjust to a log scale, and in the heatmaps, this is the reason for the long 'breaks' formula. 
+
+### Frequency with heat maps
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Marcus Smart'), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_density2d_filled(contour_var='ndensity', 
+                        breaks=seq(0, 1, 0.05)^2*2/3+seq(0, 1, 0.05)*1/3, 
+                        show.legend=FALSE) +
+  draw_court(color='grey')
+```
+
+
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Ray Allen'), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_density2d_filled(contour_var='ndensity', 
+                        breaks=seq(0, 1, 0.05)^2*2/3+seq(0, 1, 0.05)*1/3, 
+                        show.legend=FALSE) +
+  draw_court(color='grey')
+```
+
+
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Kevin Garnett'), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_density2d_filled(contour_var='ndensity', 
+                        breaks=seq(0, 1, 0.05)^2*2/3+seq(0, 1, 0.05)*1/3, 
+                        show.legend=FALSE) +
+  draw_court(color='grey')
+```
+
+
+
+
+
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Stephen Curry' & 
+                            season == 2018), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_density2d_filled(contour_var='ndensity', 
+                        breaks=seq(0, 1, 0.05)^2*2/3+seq(0, 1, 0.05)*1/3, 
+                        show.legend=FALSE) +
+  draw_court(color='grey')
+```
+
+
+
+
+
+
+### Frequency with hex bins
+
+(This is the same plot as above except with hex bins)
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Stephen Curry' & 
+                            season == 2018), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='orange', 
+                      trans='log') +
+  labs(title='   Steph Curry') +
+  draw_court(hoop_color='black')
+```
+
+Steph Curry and Ben Simmons are both listed as point guards, yet have vastly different shot charts. 
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Ben Simmons' & 
+                            season == 2018), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='purple', 
+                      trans='log') +
+  labs(title='   Ben Simmons') +
+  draw_court()
+```
+
+Comparison of the same team from 2008 vs 2018
+```{r}
+ggplot(data=df %>% filter(TEAM_NAME == 'Houston Rockets' & 
+                            season == 2008), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='orange', 
+                      trans='log') +
+  draw_court(hoop_color='black')
+```
+
+```{r}
+ggplot(data=df %>% filter(TEAM_NAME == 'Houston Rockets' & 
+                            season == 2018), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='orange', 
+                      trans='log') +
+  draw_court(hoop_color='black')
+```
+
+
+### Field goal percentage with hex bins 
+This is the percentage of made shots over total shots within each bin
+
+(These plots would probably be better with a model so it could display field goal percentage above expected)
+
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Damian Lillard' & 
+                            season == 2022), 
+       mapping=aes(x=LOC_X, y=LOC_Y, z=SHOT_MADE_FLAG)) +
+  stat_summary_hex() +
+  scale_fill_gradient(low='light blue', 
+                      high='orange') +
+  draw_court(hoop_color='black')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
