@@ -61,22 +61,18 @@ df$ACTION_TYPE = gsub('pull-up', 'driving', df$ACTION_TYPE)
 df$ACTION_TYPE = gsub('pullup', 'driving', df$ACTION_TYPE)
 df$ACTION_TYPE = gsub('running driving', 'driving', df$ACTION_TYPE)
 
-# definitely remove
+# remove
 df$ACTION_TYPE = gsub('bank ', '', df$ACTION_TYPE)
 df$ACTION_TYPE = gsub('slam ', '', df$ACTION_TYPE)
-
-# maybe remove
 df$ACTION_TYPE = gsub('finger roll ', '', df$ACTION_TYPE)
-# df$ACTION_TYPE = gsub('floating ', '', df$ACTION_TYPE)
-
-df$ACTION_TYPE %>% unique()
 
 df$SHOT_TECHNIQUE = word(df$ACTION_TYPE, -2, -1)
 df[df$SHOT_TECHNIQUE == 'layup shot', 'SHOT_TECHNIQUE'] = 'layup'
 df[df$SHOT_TECHNIQUE == 'dunk shot', 'SHOT_TECHNIQUE'] = 'dunk'
 df[df$SHOT_TECHNIQUE == 'fadeaway shot', 'SHOT_TECHNIQUE'] = 'jump shot'
 
-df$SHOT_TECHNIQUE %>% unique()
+df$SHOT_TECHNIQUE = factor(df$SHOT_TECHNIQUE, 
+                           levels=c('jump shot', 'dunk', 'layup', 'hook shot', 'tip shot'))
 
 df$running_shot = if_else(grepl('running', df$ACTION_TYPE), 1, 0)
 df$turnaround_shot = if_else(grepl('turnaround', df$ACTION_TYPE), 1, 0)
@@ -89,5 +85,3 @@ df$fadeaway_shot = if_else(grepl('fadeaway', df$ACTION_TYPE), 1, 0)
 df$alleyoop_shot = if_else(grepl('alley', df$ACTION_TYPE), 1, 0)
 df$floater_shot = if_else(grepl('floating', df$ACTION_TYPE), 1, 0)
 ```
-
-
