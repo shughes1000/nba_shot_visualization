@@ -1,0 +1,417 @@
+---
+title: "Example Shot Charts"
+author: "Sam Hughes"
+date: "2023-03-30"
+output: pdf_document
+---
+
+
+```{r}
+library(tidyverse)
+```
+
+## Get data
+
+Note: make sure data is in its own folder named "data"
+
+```{r}
+l = list()
+for (season in c(2007:2022)) {
+  l = l %>% append(list(readRDS(paste0('./data/shot_data_', season, '.rds'))))
+}
+
+df = bind_rows(l)
+
+rm(l)
+```
+
+Data cleaning
+
+```{r}
+# Make sure 0 distance shots are from restricted area
+df = df[df$SHOT_ZONE_BASIC == 'Restricted Area' | df$SHOT_DISTANCE > 0, ]
+
+# Make sure 3 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '3PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('In The Paint (Non-RA)', 'Mid-Range', 
+                                      'Restricted Area')), ]
+
+# Make sure 2 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '2PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('Left Corner 3', 'Right Corner 3', 
+                                     'Above the Break 3', 'Backcourt')), ]
+
+# Filter out no shots
+df = df[df$ACTION_TYPE != 'No Shot', ]
+```
+
+
+
+Restructure Action Types
+```{r}
+df$ACTION_TYPE = df$ACTION_TYPE %>% tolower()
+
+# simplification
+df$ACTION_TYPE = gsub('tip dunk', 'putback dunk', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('hook bank', 'hook', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('jump bank shot', 'jump shot', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('bank shot', 'jump shot', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('tip layup', 'tip', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('jump hook', 'hook', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('pull-up', 'driving', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('pullup', 'driving', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('running driving', 'driving', df$ACTION_TYPE)
+
+# remove
+df$ACTION_TYPE = gsub('bank ', '', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('slam ', '', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('finger roll ', '', df$ACTION_TYPE)
+
+df$SHOT_TECHNIQUE = word(df$ACTION_TYPE, -2, -1)
+df[df$SHOT_TECHNIQUE == 'layup shot', 'SHOT_TECHNIQUE'] = 'layup'
+df[df$SHOT_TECHNIQUE == 'dunk shot', 'SHOT_TECHNIQUE'] = 'dunk'
+df[df$SHOT_TECHNIQUE == 'fadeaway shot', 'SHOT_TECHNIQUE'] = 'jump shot'
+
+df$SHOT_TECHNIQUE = factor(df$SHOT_TECHNIQUE, 
+                           levels=c('jump shot', 'dunk', 'layup', 'hook shot', 'tip shot'))
+
+df$running_shot = if_else(grepl('running', df$ACTION_TYPE), 1, 0)
+df$turnaround_shot = if_else(grepl('turnaround', df$ACTION_TYPE), 1, 0)
+df$driving_shot = if_else(grepl('driving', df$ACTION_TYPE), 1, 0)
+df$putback_shot = if_else(grepl('putback', df$ACTION_TYPE), 1, 0)
+df$stepback_shot = if_else(grepl('step', df$ACTION_TYPE), 1, 0)
+df$cutting_shot = if_else(grepl('cutting', df$ACTION_TYPE), 1, 0)
+df$reverse_shot = if_else(grepl('reverse', df$ACTION_TYPE), 1, 0)
+df$fadeaway_shot = if_else(grepl('fadeaway', df$ACTION_TYPE), 1, 0)
+df$alleyoop_shot = if_else(grepl('alley', df$ACTION_TYPE), 1, 0)
+df$floater_shot = if_else(grepl('floating', df$ACTION_TYPE), 1, 0)
+```
+
+## Example Shot Charts
+
+### Draw Court Function
+Citation for court dimensions: https://towardsdatascience.com/make-a-simple-nba-shot-chart-with-python-e5d70db45d0d
+```{r}
+draw_court = function(color='black', hoop_color='orange', background=NULL) {
+  return(list(geom_segment(mapping=aes(x=-250, xend=250, y=-40, yend=-40), size=1, color=color), 
+  geom_segment(mapping=aes(x=-250, xend=250, y=430, yend=430), size=1, color=color),
+  geom_segment(mapping=aes(x=-250, xend=-250, y=-40, yend=430), size=1, color=color),
+  geom_segment(mapping=aes(x=250, xend=250, y=-40, yend=430), size=1, color=color),
+  # three point line
+  geom_segment(mapping=aes(x=-220, xend=-220, y=-40, yend=90), size=1, color=color),
+  geom_segment(mapping=aes(x=220, xend=220, y=-40, yend=90), size=1, color=color),
+  geom_curve(mapping=aes(x=-220, xend=220, y=90, yend=90), size=1, 
+             curvature=-0.78, lineend='round', color=color),
+  # key
+  geom_segment(mapping=aes(x=-80, xend=-80, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=80, xend=80, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=-60, xend=-60, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=60, xend=60, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=-80, xend=80, y=150, yend=150), size=1, color=color),
+  geom_curve(mapping=aes(x=-60, xend=60, y=150, yend=150), size=1, 
+             curvature=-1, lineend='round', color=color),
+  # hoop
+  geom_segment(mapping=aes(x=-30, xend=30, y=0, yend=0), size=1, color=color),
+  geom_curve(mapping=aes(x=-10, xend=10, y=13, yend=13), size=1, 
+             curvature=-1, color=hoop_color, lineend='round', color=color),
+  geom_curve(mapping=aes(x=-10, xend=10, y=13, yend=13), size=1, 
+             curvature=1, color=hoop_color, lineend='round', color=color),
+  lims(x=c(-250, 250), y=c(-40, 430)),
+  theme_minimal(), 
+  theme(panel.grid=element_blank(), 
+        panel.background=element_rect(fill=background, linetype='blank'), 
+        plot.background=element_rect(fill=background, linetype='blank'), 
+        axis.text=element_blank(), axis.title=element_blank(), 
+        aspect.ratio=4/3.76)))
+}
+```
+
+
+
+Note: to help with the fact that so many shots are taken within a very close region to the hoop, I am manually adjusting the scale of the frequency plots. In the hexbins, I adjust to a log scale, and in the heatmaps, this is the reason for the long 'breaks' formula. 
+
+### Frequency with heat maps
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Marcus Smart'), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_density2d_filled(contour_var='ndensity', 
+                        breaks=seq(0, 1, 0.05)^2*2/3+seq(0, 1, 0.05)*1/3, 
+                        show.legend=FALSE) +
+  draw_court(color='grey')
+```
+
+
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Ray Allen'), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_density2d_filled(contour_var='ndensity', 
+                        breaks=seq(0, 1, 0.05)^2*2/3+seq(0, 1, 0.05)*1/3, 
+                        show.legend=FALSE) +
+  draw_court(color='grey')
+```
+
+
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Kevin Garnett'), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_density2d_filled(contour_var='ndensity', 
+                        breaks=seq(0, 1, 0.05)^2*2/3+seq(0, 1, 0.05)*1/3, 
+                        show.legend=FALSE) +
+  draw_court(color='grey')
+```
+
+
+
+
+
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Stephen Curry' & 
+                            season == 2018), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_density2d_filled(contour_var='ndensity', 
+                        breaks=seq(0, 1, 0.05)^2*2/3+seq(0, 1, 0.05)*1/3, 
+                        show.legend=FALSE) +
+  draw_court(color='grey')
+```
+
+
+
+
+
+
+### Frequency with hex bins
+
+(This is the same plot as above except with hex bins)
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Stephen Curry' & 
+                            season == 2018), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='orange', 
+                      trans='log') +
+  labs(title='   Steph Curry') +
+  draw_court(hoop_color='black')
+```
+
+Steph Curry and Ben Simmons are both listed as point guards, yet have vastly different shot charts. 
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Ben Simmons' & 
+                            season == 2018), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='purple', 
+                      trans='log') +
+  labs(title='   Ben Simmons') +
+  draw_court()
+```
+
+Comparison of the same team from 2007 vs 2022
+```{r}
+ggplot(data=df %>% filter(TEAM_NAME == 'Boston Celtics' & 
+                            season == 2007), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='orange', 
+                      trans='log') +
+  draw_court(hoop_color='black')
+```
+
+```{r}
+ggplot(data=df %>% filter(TEAM_NAME == 'Boston Celtics' & 
+                            season == 2022), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='orange', 
+                      trans='log') +
+  draw_court(hoop_color='black')
+```
+
+```{r}
+set.seed(22)
+
+a = ggplot(data=df %>% filter(season == 2007) %>% sample_n(5000), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_steps(low='white', 
+                      high='orange', 
+                      trans='log') +
+  draw_court(hoop_color='black') + 
+  labs(title='   2007 Shot Frequencies')
+
+a
+```
+
+```{r}
+set.seed(22)
+
+b = ggplot(data=df %>% filter(season == 2022) %>% sample_n(5000), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_steps(low='white', 
+                      high='orange', 
+                      trans='log') +
+  draw_court(hoop_color='black') +
+  labs(title='   2022 Shot Frequencies')
+```
+
+```{r}
+library(ggpubr)
+
+plot = ggarrange(a, b, ncol=2)
+
+annotate_figure(plot, top='Shot Frequencies')
+```
+
+```{r}
+set.seed(22)
+
+ggplot(data=df %>% filter(season %in% c(2007, 2022)) %>% 
+         group_by(season) %>% sample_n(10000), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=TRUE) + 
+  facet_wrap(~season, switch='x') +
+  scale_fill_gradient(low='white', 
+                      high='orange', 
+                      trans='log', 
+                      labels=c('', 'Less\nFrequent', '', 'More\nFrequent', '')) +
+  draw_court(hoop_color='black') +
+  labs(title='                                 Shot Frequencies in 2007 vs 2022', 
+       fill=NULL) +
+  theme(strip.text.x=element_text(size=12))
+```
+
+```{r}
+df_2007_2022 = df %>% filter(season %in% c(2007, 2022)) %>% 
+  group_by(season) %>% sample_n(20000)
+
+
+# season_ = c(2007, 2022)
+# LOC_X_ = seq(-230, 230, 10)
+# LOC_Y_ = seq(0, 240, 10)
+# temp = expand.grid(season_, LOC_X_, LOC_Y_)
+# colnames(temp) = c('season', 'LOC_X', 'LOC_Y')
+# temp$SHOT_DISTANCE = round((temp$LOC_X^2 + temp$LOC_Y^2)^0.5/10)
+# temp = temp %>% filter(SHOT_DISTANCE <= 24)
+# 
+# df_2007_2022 = rbind(df_2007_2022, temp)
+```
+
+
+
+
+```{r}
+set.seed(22)
+
+ggplot(data=df_2007_2022, 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=TRUE) + 
+  facet_wrap(~season, switch='x') +
+  scale_fill_stepsn(colors=c('white', '#ffcbd1', '#ee6b6e', '#ff2c2c', '#c30010'), 
+                    trans='log', 
+                    labels=c('Less\nFrequent', '', '', 'More\nFrequent')) +
+  draw_court(hoop_color='black') +
+  labs(title='                                 Shot Frequencies in 2007 vs 2022', 
+       fill=NULL) +
+  theme(strip.text.x=element_text(size=12))
+```
+
+
+
+
+
+```{r}
+ggplot(data=df %>% filter(TEAM_NAME == 'Golden State Warriors' & 
+                            season == 2022), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='orange', 
+                      trans='log') +
+  draw_court(hoop_color='black')
+```
+
+```{r}
+ggplot(data=df %>% filter(TEAM_NAME == 'Los Angeles Lakers' & 
+                            season == 2022), 
+       mapping=aes(x=LOC_X, y=LOC_Y)) +
+  geom_hex(show.legend=FALSE) + 
+  scale_fill_gradient(low='white', 
+                      high='orange', 
+                      trans='log') +
+  draw_court(hoop_color='black')
+```
+
+
+
+
+### Field goal percentage with hex bins 
+This is the percentage of made shots over total shots within each bin
+
+(These plots would probably be better with a model so it could display field goal percentage above expected)
+
+```{r}
+ggplot(data=df %>% filter(PLAYER_NAME == 'Damian Lillard' & 
+                            season == 2022), 
+       mapping=aes(x=LOC_X, y=LOC_Y, z=SHOT_MADE_FLAG)) +
+  stat_summary_hex() +
+  scale_fill_gradient(low='light blue', 
+                      high='orange') +
+  draw_court(hoop_color='black')
+```
+
+
+
+
+
+
+
+
+```{r}
+df_shot_chart = df %>% filter(SHOT_DISTANCE < 28 & LOC_X %% 2 == 0 & LOC_Y %% 2 == 0) %>% 
+  group_by(LOC_X, LOC_Y) %>% sample_n(1)
+
+nrow(df_shot_chart)
+```
+
+```{r}
+df_shot_chart$points = if_else(df_shot_chart$SHOT_TYPE == '3PT Field Goal', 
+                               3*df_shot_chart$SHOT_MADE_FLAG, 2*df_shot_chart$SHOT_MADE_FLAG)
+
+mean(df_shot_chart$points)
+```
+
+```{r}
+a = ggplot(data=df_shot_chart, 
+       mapping=aes(x=LOC_X, y=LOC_Y, z=SHOT_MADE_FLAG)) +
+  stat_summary_hex() +
+  scale_fill_gradient(low='light blue', 
+                      high='orange') +
+  draw_court(hoop_color='black') +
+  labs(fill='Field Goal Percentage')
+
+a
+```
+
+
+
+```{r}
+b = ggplot(data=df_shot_chart, 
+       mapping=aes(x=LOC_X, y=LOC_Y, z=points)) +
+  stat_summary_hex(bins=30) +
+  scale_fill_gradient(low='light blue', 
+                      high='orange') +
+  draw_court(hoop_color='black') +
+  labs(fill='Average Points Scored')
+
+b
+```
+
+
+
+
+
+
