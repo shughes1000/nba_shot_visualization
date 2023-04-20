@@ -1,0 +1,246 @@
+---
+title: "Bar Graphs"
+author: "Sam Hughes"
+date: "2023-03-30"
+output: pdf_document
+---
+
+```{r}
+library(tidyverse)
+```
+
+## Get data
+
+Note: make sure data is in its own folder named "data"
+
+```{r}
+l = list()
+for (season in c(2007:2022)) {
+  l = l %>% append(list(readRDS(paste0('./data/shot_data_', season, '.rds'))))
+}
+
+df = bind_rows(l)
+
+rm(l)
+```
+
+Data cleaning
+
+```{r}
+# Make sure 0 distance shots are from restricted area
+df = df[df$SHOT_ZONE_BASIC == 'Restricted Area' | df$SHOT_DISTANCE > 0, ]
+
+# Make sure 3 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '3PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('In The Paint (Non-RA)', 'Mid-Range', 
+                                      'Restricted Area')), ]
+
+# Make sure 2 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '2PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('Left Corner 3', 'Right Corner 3', 
+                                     'Above the Break 3', 'Backcourt')), ]
+
+# Filter out no shots
+df = df[df$ACTION_TYPE != 'No Shot', ]
+```
+
+
+
+Restructure Action Types
+```{r}
+df$ACTION_TYPE = df$ACTION_TYPE %>% tolower()
+
+# simplification
+df$ACTION_TYPE = gsub('tip dunk', 'putback dunk', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('hook bank', 'hook', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('jump bank shot', 'jump shot', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('bank shot', 'jump shot', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('tip layup', 'tip', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('jump hook', 'hook', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('pull-up', 'driving', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('pullup', 'driving', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('running driving', 'driving', df$ACTION_TYPE)
+
+# remove
+df$ACTION_TYPE = gsub('bank ', '', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('slam ', '', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('finger roll ', '', df$ACTION_TYPE)
+
+df$SHOT_TECHNIQUE = word(df$ACTION_TYPE, -2, -1)
+df[df$SHOT_TECHNIQUE == 'layup shot', 'SHOT_TECHNIQUE'] = 'layup'
+df[df$SHOT_TECHNIQUE == 'dunk shot', 'SHOT_TECHNIQUE'] = 'dunk'
+df[df$SHOT_TECHNIQUE == 'fadeaway shot', 'SHOT_TECHNIQUE'] = 'jump shot'
+
+df$SHOT_TECHNIQUE = factor(df$SHOT_TECHNIQUE, 
+                           levels=c('jump shot', 'dunk', 'layup', 'hook shot', 'tip shot'))
+
+df$running_shot = if_else(grepl('running', df$ACTION_TYPE), 1, 0)
+df$turnaround_shot = if_else(grepl('turnaround', df$ACTION_TYPE), 1, 0)
+df$driving_shot = if_else(grepl('driving', df$ACTION_TYPE), 1, 0)
+df$putback_shot = if_else(grepl('putback', df$ACTION_TYPE), 1, 0)
+df$stepback_shot = if_else(grepl('step', df$ACTION_TYPE), 1, 0)
+df$cutting_shot = if_else(grepl('cutting', df$ACTION_TYPE), 1, 0)
+df$reverse_shot = if_else(grepl('reverse', df$ACTION_TYPE), 1, 0)
+df$fadeaway_shot = if_else(grepl('fadeaway', df$ACTION_TYPE), 1, 0)
+df$alleyoop_shot = if_else(grepl('alley', df$ACTION_TYPE), 1, 0)
+df$floater_shot = if_else(grepl('floating', df$ACTION_TYPE), 1, 0)
+```
+
+
+## Bar Graphs
+
+```{r}
+df_shot_zone_totals = df %>% group_by(season, SHOT_ZONE_BASIC) %>%
+  summarise(shot_count=length(SHOT_ZONE_BASIC), shots_made=sum(SHOT_MADE_FLAG))
+df_shot_totals = df %>% group_by(season) %>% 
+  summarise(total_shots=length(SHOT_ZONE_BASIC))
+
+df_shot_zone_totals$field_goal_pct = df_shot_zone_totals$shots_made/df_shot_zone_totals$shot_count
+
+df_shot_zone_totals = left_join(df_shot_zone_totals, df_shot_totals)
+
+df_shot_zone_totals$Proportion = df_shot_zone_totals$shot_count/df_shot_zone_totals$total_shots
+
+df_shot_zone_totals = left_join(df_shot_zone_totals, 
+                               df %>% select(c(SHOT_ZONE_BASIC, SHOT_TYPE)) %>% unique())
+
+head(df_shot_zone_totals)
+```
+
+
+citation for multiple graphs in a single plot: https://stackoverflow.com/questions/13649473/add-a-common-legend-for-combined-ggplots
+```{r}
+library(ggpubr)
+```
+
+
+```{r, fig.height=5, fig.width=5}
+shot_selection_graph = ggplot(data=df_shot_zone_totals %>% 
+                                filter(SHOT_ZONE_BASIC != 'Backcourt'), 
+       mapping=aes(x=season, y=Proportion, fill=SHOT_TYPE)) +
+  geom_bar(stat='identity', show.legend=FALSE) +
+  facet_wrap(~factor(SHOT_ZONE_BASIC, 
+                     levels=c('Mid-Range', 'Restricted Area', 'In The Paint (Non-RA)', 
+                              'Above the Break 3', 'Left Corner 3', 'Right Corner 3'))) +
+  labs(title='How Has Shot Selection Changed Over Time?', 
+       x='Season\n', y='Frequency') +
+  scale_x_continuous(breaks=seq(2007, 2022, 3)) +
+  theme_bw()
+
+field_goal_percentage_graph = ggplot(data=df_shot_zone_totals %>% 
+                                       filter(SHOT_ZONE_BASIC != 'Backcourt'), 
+       mapping=aes(x=season, y=field_goal_pct, fill=SHOT_TYPE)) +
+  geom_bar(stat='identity', show.legend=FALSE) +
+  facet_wrap(~factor(SHOT_ZONE_BASIC, 
+                     levels=c('Mid-Range', 'Restricted Area', 'In The Paint (Non-RA)', 
+                              'Above the Break 3', 'Left Corner 3', 'Right Corner 3'))) +
+  labs(title='Have Shooters Become More Accurate?', 
+       x='Season', y='Field Goal Percentage') +
+  scale_x_continuous(breaks=seq(2007, 2022, 3)) +
+  theme_bw()
+
+ggarrange(shot_selection_graph, field_goal_percentage_graph, nrow=2)
+```
+The two above graphs show that shot selection has vastly changed (less mid range shots, more above the break three point shots) despite the percentage of made shots from each zone staying relatively stagnant. This can be explained by the breakthrough in strategy, where the expected points scored from two point field goals versus three point field goals is considered. 
+
+```{r}
+shot_selection_graph
+```
+
+```{r}
+field_goal_percentage_graph
+```
+
+
+
+
+```{r}
+df_grouped = df %>% group_by(SHOT_DISTANCE, SHOT_TYPE) %>% 
+  summarise(pct = mean(SHOT_MADE_FLAG), count=length(SHOT_DISTANCE)) 
+df_grouped = df_grouped %>% mutate(ep = if_else(SHOT_TYPE == '2PT Field Goal', 2*pct, 3*pct))
+
+head(df_grouped)
+```
+
+
+Expected Points of Shot: $ExpectedPoints = MakePercentage * ShotType$ where $ShotType = 2$ for a two point shot and $ShotType = 3$ for a three point shot
+```{r, fig.height=5, fig.width=5}
+pct_by_distance_graph = ggplot(data=df_grouped %>% 
+                                 filter(SHOT_DISTANCE <= 30), 
+         mapping=aes(x=SHOT_DISTANCE, y=pct, fill=SHOT_TYPE)) +
+  geom_bar(stat='identity', position='dodge') +
+  theme_minimal() +
+  scale_x_continuous(breaks=seq(0, 30, 2)) +
+  labs(title='Field Goal Percentage by Distance', 
+       x='Shot Distance (Feet)\n', 
+       y='Make Percentage', 
+       fill='Shot Type')
+
+ep_by_distance_graph = ggplot(data=df_grouped %>% 
+         filter(SHOT_DISTANCE <= 30), 
+         mapping=aes(x=SHOT_DISTANCE, y=ep, fill=SHOT_TYPE)) +
+  geom_bar(stat='identity', position='dodge') +
+  theme_minimal() +
+  scale_x_continuous(breaks=seq(0, 30, 2)) +
+  labs(title='Expected Points by Distance', 
+       x='Shot Distance (Feet)', 
+       y='Expected Value of Shot', 
+       fill='Shot Type')
+
+# grid.arrange(pct_by_distance_graph, ep_by_distance_graph, nrow=2)
+
+ggarrange(pct_by_distance_graph, ep_by_distance_graph, nrow=2, 
+          common.legend=TRUE, legend='bottom')
+```
+
+```{r}
+df$points_scored = if_else(df$SHOT_MADE_FLAG == 1, 
+                           if_else(df$SHOT_TYPE == '2PT Field Goal', 2, 3), 
+                           0)
+
+table(df$points_scored)
+```
+
+
+```{r}
+df %>% group_by(season, GAME_ID, TEAM_ID) %>% summarise('Score' = sum(points_scored))
+```
+
+
+Citation to scrape html table: http://uc-r.github.io/scraping_HTML_tables
+Citation for data: https://www.basketball-reference.com/leagues/NBA_stats_per_game.html
+```{r}
+library(rvest)
+
+webpage = read_html('https://www.basketball-reference.com/leagues/NBA_stats_per_game.html')
+
+df_ppg = html_table(webpage)[[1]]
+
+colnames(df_ppg) = df_ppg[1, ]
+
+df_ppg$Season = as.numeric(substr(df_ppg$Season, 1, 4)) + 1
+
+df_ppg = df_ppg %>% filter(Season >= 2007 & Season < 2023) %>% select(Season, PTS)
+
+# df_ppg$Season = factor(df_ppg$Season)
+df_ppg$PTS = as.numeric(df_ppg$PTS)
+
+head(df_ppg)
+```
+
+```{r}
+ggplot(data=df_ppg, mapping=aes(x=Season, y=PTS)) +
+  geom_bar(stat='identity', fill='#355C7D') +
+  theme_minimal() + 
+  labs(title='Points Per Game by Season', 
+       x='Season', y='Average Points Scored') +
+  scale_x_continuous(breaks=seq(2007, 2022, 1)) +
+  scale_y_continuous(breaks=seq(0, 120, 10))
+```
+
+
+
+
+
+
+
