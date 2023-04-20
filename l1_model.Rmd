@@ -1,0 +1,325 @@
+---
+title: "L2 Logistic Regression Model"
+author: "Sam Hughes"
+date: "2023-04-17"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+```
+
+## Get data
+
+Note: make sure data is in its own folder named "data"
+
+```{r}
+l = list()
+for (season in c(2007:2022)) {
+  l = l %>% append(list(readRDS(paste0('./data/shot_data_', season, '.rds'))))
+}
+
+df = bind_rows(l)
+
+rm(l)
+```
+
+Data cleaning
+
+```{r}
+# Make sure 0 distance shots are from restricted area
+df = df[df$SHOT_ZONE_BASIC == 'Restricted Area' | df$SHOT_DISTANCE > 0, ]
+
+# Make sure 3 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '3PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('In The Paint (Non-RA)', 'Mid-Range', 
+                                      'Restricted Area')), ]
+
+# Make sure 2 pointers fall under appropriate category
+df = df[!(df$SHOT_TYPE == '2PT Field Goal' & 
+            df$SHOT_ZONE_BASIC %in% c('Left Corner 3', 'Right Corner 3', 
+                                     'Above the Break 3', 'Backcourt')), ]
+
+# Filter out no shots
+df = df[df$ACTION_TYPE != 'No Shot', ]
+```
+
+
+
+Restructure Action Types
+```{r}
+df$ACTION_TYPE = df$ACTION_TYPE %>% tolower()
+
+# simplification
+df$ACTION_TYPE = gsub('tip dunk', 'putback dunk', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('hook bank', 'hook', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('jump bank shot', 'jump shot', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('bank shot', 'jump shot', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('tip layup', 'tip', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('jump hook', 'hook', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('pull-up', 'driving', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('pullup', 'driving', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('running driving', 'driving', df$ACTION_TYPE)
+
+# remove
+df$ACTION_TYPE = gsub('bank ', '', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('slam ', '', df$ACTION_TYPE)
+df$ACTION_TYPE = gsub('finger roll ', '', df$ACTION_TYPE)
+
+df$SHOT_TECHNIQUE = word(df$ACTION_TYPE, -2, -1)
+df[df$SHOT_TECHNIQUE == 'layup shot', 'SHOT_TECHNIQUE'] = 'layup'
+df[df$SHOT_TECHNIQUE == 'dunk shot', 'SHOT_TECHNIQUE'] = 'dunk'
+df[df$SHOT_TECHNIQUE == 'fadeaway shot', 'SHOT_TECHNIQUE'] = 'jump shot'
+
+df$SHOT_TECHNIQUE = factor(df$SHOT_TECHNIQUE, 
+                           levels=c('jump shot', 'dunk', 'layup', 'hook shot', 'tip shot'))
+
+df$running_shot = if_else(grepl('running', df$ACTION_TYPE), 1, 0)
+df$turnaround_shot = if_else(grepl('turnaround', df$ACTION_TYPE), 1, 0)
+df$driving_shot = if_else(grepl('driving', df$ACTION_TYPE), 1, 0)
+df$putback_shot = if_else(grepl('putback', df$ACTION_TYPE), 1, 0)
+df$stepback_shot = if_else(grepl('step', df$ACTION_TYPE), 1, 0)
+df$cutting_shot = if_else(grepl('cutting', df$ACTION_TYPE), 1, 0)
+df$reverse_shot = if_else(grepl('reverse', df$ACTION_TYPE), 1, 0)
+df$fadeaway_shot = if_else(grepl('fadeaway', df$ACTION_TYPE), 1, 0)
+df$alleyoop_shot = if_else(grepl('alley', df$ACTION_TYPE), 1, 0)
+df$floater_shot = if_else(grepl('floating', df$ACTION_TYPE), 1, 0)
+```
+
+```{r}
+set.seed(22)
+
+df_mod = df %>% mutate(ABS_LOC_X = abs(LOC_X)) %>%
+  select(c(SHOT_MADE_FLAG, SHOT_DISTANCE, ABS_LOC_X, LOC_Y, SHOT_TECHNIQUE, 
+           running_shot, turnaround_shot, driving_shot, putback_shot, stepback_shot, 
+           cutting_shot, reverse_shot, fadeaway_shot, alleyoop_shot, floater_shot))
+
+training_indices = sample(nrow(df), nrow(df)*0.5)
+
+df_train = df_mod[training_indices, ]
+df_test = df_mod[-training_indices, ]
+
+rm(df_mod)
+```
+
+
+```{r}
+library(glmnet)
+
+f = as.formula(SHOT_MADE_FLAG ~ .)
+X_train = model.matrix(f, df_train)[, -1]
+y_train = df_train$SHOT_MADE_FLAG
+
+X_test = model.matrix(f, df_test)[, -1]
+y_test = df_test$SHOT_MADE_FLAG
+
+X_train[1:5, ]
+```
+
+```{r}
+library(caret)
+
+s = preProcess(X_train)
+X_train = predict(s, X_train)
+X_test = predict(s, X_test)
+
+X_train[1:5, ]
+```
+
+
+
+
+
+
+
+
+```{r}
+cv_mod = cv.glmnet(X_train, y_train, alpha=1, nfolds=3, family='binomial')
+best_lambda = cv_mod$lambda.min
+
+best_lambda
+```
+
+```{r}
+mod = glmnet(X_train, y_train, lambda=best_lambda, alpha=1, family='binomial')
+
+coef(mod)
+```
+
+```{r}
+model_sum = as.data.frame(round(coef(mod), 2)[ , 1])
+model_sum = cbind(newColName = rownames(model_sum), model_sum)
+
+rownames(model_sum) = 1:nrow(model_sum)
+colnames(model_sum) = c('Variable', 'Value')
+
+model_sum = model_sum %>% arrange(desc(Value))
+
+model_sum
+```
+
+```{r}
+mean(y_test == round(predict(mod, X_test, type='response')))
+```
+
+
+
+
+```{r}
+library(pROC)
+
+scores = roc(y_test, predict(mod, X_test, type='response'))
+
+scores
+```
+
+```{r}
+auc = round(scores$auc, 5)
+
+auc
+```
+
+
+```{r}
+paste0('Area Under Curve: ', auc)
+```
+
+
+
+```{r}
+ggroc(scores, size=1, color='#355C7D') + 
+  geom_segment(aes(x=1, xend=0, y=0, yend=1), color='grey', alpha=0.1, size=1) +
+  theme_minimal() +
+  theme(aspect.ratio=1) +
+  labs(title='Area Under Curve: 0.6461', x='Specificity', y='Sensitivity')
+```
+
+```{r}
+write_csv(model_sum, 'model_summary.csv')
+
+'Done'
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Citation for court dimensions: https://towardsdatascience.com/make-a-simple-nba-shot-chart-with-python-e5d70db45d0d
+```{r}
+draw_court = function(color='black', hoop_color='orange', background=NULL) {
+  return(list(geom_segment(mapping=aes(x=-250, xend=250, y=-40, yend=-40), size=1, color=color), 
+  geom_segment(mapping=aes(x=-250, xend=250, y=430, yend=430), size=1, color=color),
+  geom_segment(mapping=aes(x=-250, xend=-250, y=-40, yend=430), size=1, color=color),
+  geom_segment(mapping=aes(x=250, xend=250, y=-40, yend=430), size=1, color=color),
+  # three point line
+  geom_segment(mapping=aes(x=-220, xend=-220, y=-40, yend=90), size=1, color=color),
+  geom_segment(mapping=aes(x=220, xend=220, y=-40, yend=90), size=1, color=color),
+  geom_curve(mapping=aes(x=-220, xend=220, y=90, yend=90), size=1, 
+             curvature=-0.78, lineend='round', color=color),
+  # key
+  geom_segment(mapping=aes(x=-80, xend=-80, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=80, xend=80, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=-60, xend=-60, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=60, xend=60, y=-40, yend=150), size=1, color=color),
+  geom_segment(mapping=aes(x=-80, xend=80, y=150, yend=150), size=1, color=color),
+  geom_curve(mapping=aes(x=-60, xend=60, y=150, yend=150), size=1, 
+             curvature=-1, lineend='round', color=color),
+  # hoop
+  geom_segment(mapping=aes(x=-30, xend=30, y=0, yend=0), size=1, color=color),
+  geom_curve(mapping=aes(x=-10, xend=10, y=13, yend=13), size=1, 
+             curvature=-1, color=hoop_color, lineend='round', color=color),
+  geom_curve(mapping=aes(x=-10, xend=10, y=13, yend=13), size=1, 
+             curvature=1, color=hoop_color, lineend='round', color=color),
+  lims(x=c(-250, 250), y=c(-40, 430)),
+  theme_minimal(), 
+  theme(panel.grid=element_blank(), 
+        panel.background=element_rect(fill=background, linetype='blank'), 
+        plot.background=element_rect(fill=background, linetype='blank'), 
+        axis.text=element_blank(), axis.title=element_blank(), 
+        aspect.ratio=4/3.76)))
+}
+```
+
+
+```{r}
+set.seed(22)
+df_shot_chart = df %>% filter(SHOT_DISTANCE < 28 & LOC_X %% 2 == 0 & LOC_Y %% 2 == 0) %>% 
+  group_by(LOC_X, LOC_Y) %>% sample_n(1)
+
+df_shot_chart_model = df_shot_chart %>%
+  mutate(ABS_LOC_X = abs(LOC_X)) %>%
+  select(c(SHOT_MADE_FLAG, SHOT_DISTANCE, ABS_LOC_X, LOC_Y, SHOT_TECHNIQUE, 
+           running_shot, turnaround_shot, driving_shot, putback_shot, stepback_shot, 
+           cutting_shot, reverse_shot, fadeaway_shot, alleyoop_shot, floater_shot))
+
+nrow(df_shot_chart_model)
+```
+
+```{r}
+X_shot_chart = model.matrix(f, df_shot_chart_model)[, -1][, 2:18]
+
+X_shot_chart = predict(s, X_shot_chart)
+
+X_shot_chart[1:3, ]
+```
+
+```{r}
+df_shot_chart$pct = round(predict(mod, X_shot_chart, type='response'), 2)
+df_shot_chart$ep = round(if_else(df_shot_chart$SHOT_TYPE == '3PT Field Goal', 
+                                 3*df_shot_chart$pct, 2*df_shot_chart$pct), 2)
+
+df_shot_chart$ep %>% mean()
+```
+
+Citation for decimal points: https://community.rstudio.com/t/decimal-places-in-ggplot2/73635 
+```{r}
+a = ggplot(data=df_shot_chart, 
+       mapping=aes(x=LOC_X, y=LOC_Y, z=pct)) +
+  stat_summary_hex() +
+  scale_fill_steps(low='light blue', 
+                   high='orange', 
+                   labels=function(x) paste0(format(round(x, 2), nsmall=2)), 
+                   nice.breaks=FALSE, 
+                   n.breaks=3) +
+  draw_court(hoop_color='black') +
+  labs(fill='Field Goal\nPercentage')
+
+a
+```
+
+
+```{r}
+b = ggplot(data=df_shot_chart, 
+       mapping=aes(x=LOC_X, y=LOC_Y, z=ep)) +
+  stat_summary_hex(bins=30) +
+  scale_fill_steps(low='light blue', 
+                   high='orange', 
+                   labels=function(x) paste0(format(round(x, 2), nsmall=2)), 
+                   nice.breaks=FALSE, 
+                   n.breaks=3) +
+  draw_court(hoop_color='black') +
+  labs(fill='Expected Points')
+
+b
+```
+
+
